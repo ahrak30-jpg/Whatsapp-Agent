@@ -1,54 +1,56 @@
 const express = require("express");
-const { GoogleGenerativeAI } = require("@google/generative-ai");
 require("dotenv").config();
 
 const app = express();
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
 // Store conversation history per user (in-memory)
 const conversations = {};
 
 app.post("/webhook", async (req, res) => {
   const incomingMsg = req.body.Body?.trim();
-  const from = req.body.From; // e.g. "whatsapp:+1234567890"
+  const from = req.body.From;
 
   if (!incomingMsg || !from) {
     return res.status(400).send("Bad request");
   }
 
-  // Initialize conversation history for this user
   if (!conversations[from]) {
     conversations[from] = [];
   }
 
-  // Add user message to history
-  conversations[from].push({ role: "user", parts: [{ text: incomingMsg }] });
+  conversations[from].push({ role: "user", content: incomingMsg });
 
-  // Keep only last 20 messages to avoid token limits
   if (conversations[from].length > 20) {
     conversations[from] = conversations[from].slice(-20);
   }
 
   try {
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.0-flash",
-      systemInstruction: `You are a helpful personal AI assistant running on WhatsApp.
-You are concise and friendly. Keep responses short and clear — this is a chat interface.
-Use plain text only, no markdown (no **, no #, no bullet dashes — use numbers or plain text instead).
-Today's date is ${new Date().toDateString()}.`,
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        messages: [
+          {
+            role: "system",
+            content: `You are a helpful personal AI assistant running on WhatsApp. You are concise and friendly. Keep responses short and clear. Use plain text only, no markdown. Today's date is ${new Date().toDateString()}.`
+          },
+          ...conversations[from]
+        ],
+        max_tokens: 1024
+      })
     });
 
-    const chat = model.startChat({ history: conversations[from].slice(0, -1) });
-    const result = await chat.sendMessage(incomingMsg);
-    const reply = result.response.text();
+    const data = await response.json();
+    const reply = data.choices[0].message.content;
 
-    // Add assistant reply to history
-    conversations[from].push({ role: "model", parts: [{ text: reply }] });
+    conversations[from].push({ role: "assistant", content: reply });
 
-    // Send reply via Twilio TwiML
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Message><Body>${reply}</Body></Message>
@@ -56,7 +58,7 @@ Today's date is ${new Date().toDateString()}.`,
 
     res.type("text/xml").send(twiml);
   } catch (err) {
-    console.error("Gemini API error:", err);
+    console.error("Groq API error:", err);
     const errorTwiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Message><Body>Sorry, something went wrong. Please try again.</Body></Message>
@@ -65,8 +67,7 @@ Today's date is ${new Date().toDateString()}.`,
   }
 });
 
-// Health check
-app.get("/", (req, res) => res.send("WhatsApp Agent is running ✅"));
+app.get("/", (req, res) => res.send("WhatsApp Agent is running âœ…"));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
