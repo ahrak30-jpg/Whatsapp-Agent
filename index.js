@@ -34,7 +34,7 @@ app.post("/webhook", async (req, res) => {
 
   try {
     const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
+      model: "gemini-2.0-flash",
       systemInstruction: `You are a helpful personal AI assistant running on WhatsApp.
 You are concise and friendly. Keep responses short and clear — this is a chat interface.
 Use plain text only, no markdown (no **, no #, no bullet dashes — use numbers or plain text instead).
